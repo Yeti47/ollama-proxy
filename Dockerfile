@@ -12,3 +12,4 @@ COPY --from=builder /bin/ollama-proxy /usr/local/bin/ollama-proxy
 USER 1000:1000
 EXPOSE 11434
 ENTRYPOINT ["/usr/local/bin/ollama-proxy"]
+CMD ["-listen", ":11434"]

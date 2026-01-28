@@ -53,6 +53,12 @@ Build and run with docker:
 docker build -t ollama-proxy:latest .
 # run (pass OLLAMA_API_KEY via env)
 # bind port to localhost on the host to avoid exposing the service publicly
+# the container listens on all interfaces (0.0.0.0) by default; this image sets the default listen address to :11434
+# override the listen address inside the container by passing flags after the image:
+#   docker run --rm -p 127.0.0.1:11434:11434 -e OLLAMA_API_KEY="$OLLAMA_API_KEY" ollama-proxy:latest -listen 127.0.0.1:11434
+# or when using docker-compose set the service `command` (see `docker-compose.yml`):
+#   command: ["-listen", "127.0.0.1:11434"]
+
 docker run --rm -p 127.0.0.1:11434:11434 -e OLLAMA_API_KEY="$OLLAMA_API_KEY" ollama-proxy:latest
 ```
 
