@@ -23,7 +23,7 @@ Run with flags:
 
 ## Authentication (Ollama API key)
 
-Ollama cloud requires a Bearer token set in the `Authorization` header. Provide the key with the `-api-key` flag or `OLLAMA_API_KEY` environment variable. By default the proxy will inject/override the `Authorization` header for every request to emulate a local Ollama install. Use `-preserve-auth` to preserve client-supplied `Authorization` headers instead of overriding. The proxy will not log the Authorization header or the key.
+Ollama cloud requires a Bearer token set in the `Authorization` header. Provide the key with the `-api-key` flag or `OLLAMA_API_KEY` environment variable. By default the proxy will inject/override the `Authorization` header for every request to emulate a local Ollama install. Use `-preserve-auth` to preserve client-supplied `Authorization` headers instead of overriding. Use `-verbose` to log full request and response bodies; the proxy will redact the API key and any `Authorization` bearer tokens in logs. The proxy will not otherwise log the raw Authorization header or the key.
 
 Example:
 

@@ -1,9 +1,13 @@
 package proxy
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +23,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", false)
+		p := NewReverseProxy(u, "sk-test", false, false)
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -49,7 +53,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", true)
+		p := NewReverseProxy(u, "sk-test", true, false)
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -71,4 +75,38 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 			t.Fatal("timeout waiting for upstream request")
 		}
 	})
+}
+
+func TestVerboseRedactsAPIKey(t *testing.T) {
+	// capture logs
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream", "yes")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("response body"))
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	p := NewReverseProxy(u, "sk-secret", false, true)
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	req, _ := http.NewRequest("POST", proxySrv.URL+"/api/echo", bytes.NewBuffer([]byte("hello")))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do error: %v", err)
+	}
+	resp.Body.Close()
+
+	out := buf.String()
+	if strings.Contains(out, "sk-secret") {
+		t.Fatalf("logs must not contain API key")
+	}
+	if !strings.Contains(out, "[REDACTED]") {
+		t.Fatalf("expected redaction placeholder in logs")
+	}
 }

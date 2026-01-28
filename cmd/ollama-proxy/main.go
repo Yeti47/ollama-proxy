@@ -20,6 +20,7 @@ func main() {
 	target := flag.String("target", "https://ollama.com", "upstream target URL")
 	apiKey := flag.String("api-key", "", "Ollama API key to inject as Authorization: Bearer <key> (can also set OLLAMA_API_KEY env var)")
 	preserveAuth := flag.Bool("preserve-auth", false, "do not overwrite client Authorization header if present")
+	verbose := flag.Bool("verbose", false, "log full request and response bodies (API key will be redacted)")
 	flag.Parse()
 
 	// prefer env var if flag not provided
@@ -33,9 +34,9 @@ func main() {
 		log.Fatalf("invalid target url: %v", err)
 	}
 
-	p := proxy.NewReverseProxy(u, key, *preserveAuth)
-	// don't log the API key; only log whether it's present
-	log.Printf("api-key present=%t preserve-auth=%t", key != "", *preserveAuth)
+	p := proxy.NewReverseProxy(u, key, *preserveAuth, *verbose)
+	// don't log the API key; only log whether it's present. show if verbose is enabled
+	log.Printf("api-key present=%t preserve-auth=%t verbose=%t", key != "", *preserveAuth, *verbose)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", loggingMiddleware(p))
