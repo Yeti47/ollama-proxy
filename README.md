@@ -21,11 +21,6 @@ Run with flags:
 ./ollama-proxy -listen :11434 -target https://ollama.com
 ```
 
-Or using environment variables (shell):
-```sh
-LISTEN=:11434 TARGET=https://ollama.com ./ollama-proxy
-```
-
 ## Authentication (Ollama API key)
 
 Ollama cloud requires a Bearer token set in the `Authorization` header. Provide the key with the `-api-key` flag or `OLLAMA_API_KEY` environment variable. By default the proxy will inject/override the `Authorization` header for every request to emulate a local Ollama install. Use `-preserve-auth` to preserve client-supplied `Authorization` headers instead of overriding. The proxy will not log the Authorization header or the key.
