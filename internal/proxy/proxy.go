@@ -46,56 +46,11 @@ func maskSensitive(apiKey, s string) string {
 	return s
 }
 
-// responseLogger captures up to limit bytes while allowing the body to
-// stream through to the client. It logs the captured portion on Close.
-type responseLogger struct {
-	rc      io.ReadCloser
-	buf     *bytes.Buffer
-	limit   int
-	apiKey  string
-	status  string
-	headers http.Header
-	logged  bool
-}
-
-func (r *responseLogger) Read(p []byte) (int, error) {
-	n, err := r.rc.Read(p)
-	if n > 0 && r.buf.Len() < r.limit {
-		toWrite := p[:n]
-		remain := r.limit - r.buf.Len()
-		if len(toWrite) > remain {
-			r.buf.Write(toWrite[:remain])
-		} else {
-			r.buf.Write(toWrite)
-		}
-	}
-	if err == io.EOF {
-		r.log()
-	}
-	return n, err
-}
-
-func (r *responseLogger) Close() error {
-	if !r.logged {
-		r.log()
-	}
-	return r.rc.Close()
-}
-
-func (r *responseLogger) log() {
-	r.logged = true
-	bodyStr := maskSensitive(r.apiKey, r.buf.String())
-	if r.buf.Len() >= r.limit {
-		bodyStr += "...[truncated]"
-	}
-	log.Printf("<- response status=%s headers=%v body=%s", r.status, r.headers, bodyStr)
-}
-
 // NewReverseProxy returns a reverse proxy that forwards to target while
 // preserving path, headers and body. It sets Host and X-Forwarded-* headers
 // and uses a reasonable Transport with TLS verification enabled. It can also
 // inject an Authorization: Bearer <key> header if apiKey is provided.
-func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, verbose bool, versionFallback string) *httputil.ReverseProxy {
+func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, versionFallback string) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	const maxLogBody = 1 << 20 // 1MB
@@ -128,36 +83,6 @@ func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, verbose 
 			}
 		}
 
-		// Verbose logging: capture and log request headers and body with redaction
-		if verbose {
-			// copy and sanitize headers
-			sanitized := make(http.Header)
-			for k, v := range r.Header {
-				if k == "Authorization" {
-					sanitized[k] = []string{"Bearer [REDACTED]"}
-				} else {
-					sanitized[k] = v
-				}
-			}
-
-			var bodyStr string
-			if r.Body != nil {
-				b, _ := io.ReadAll(io.LimitReader(r.Body, maxLogBody+1))
-				trunc := false
-				if len(b) > maxLogBody {
-					b = b[:maxLogBody]
-					trunc = true
-				}
-				// restore body for proxy transport
-				r.Body = io.NopCloser(bytes.NewReader(b))
-				bodyStr = maskSensitive(apiKey, string(b))
-				if trunc {
-					bodyStr += "...[truncated]"
-				}
-			}
-
-			log.Printf("-> request %s %s headers=%v body=%s", r.Method, r.URL.String(), sanitized, bodyStr)
-		}
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
@@ -169,7 +94,7 @@ func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, verbose 
 				if resp.Body != nil {
 					b, err := io.ReadAll(resp.Body)
 					if err == nil {
-						var m map[string]interface{}
+						var m map[string]any
 						if json.Unmarshal(b, &m) == nil {
 							fallback := versionFallback
 							if fallback == "" {
@@ -181,6 +106,10 @@ func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, verbose 
 								resp.Body = io.NopCloser(bytes.NewReader(nb))
 								resp.ContentLength = int64(len(nb))
 								resp.Header.Set("Content-Length", strconv.Itoa(len(nb)))
+								// If upstream used chunked encoding, remove it to avoid
+								// conflicting headers when we set Content-Length.
+								resp.Header.Del("Transfer-Encoding")
+								resp.TransferEncoding = nil
 								log.Printf("fixed /api/version value to %s", fallback)
 							} else {
 								// restore original body
@@ -194,33 +123,6 @@ func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, verbose 
 			}
 		}
 
-		if verbose {
-			// copy and sanitize response headers
-			sanitized := make(http.Header)
-			for k, v := range resp.Header {
-				if k == "Authorization" {
-					sanitized[k] = []string{"Bearer [REDACTED]"}
-				} else {
-					sanitized[k] = v
-				}
-			}
-
-			// Wrap the body so we don't eagerly consume streaming responses.
-			if resp.Body != nil {
-				resp.Body = &responseLogger{
-					rc:      resp.Body,
-					buf:     bytes.NewBuffer(nil),
-					limit:   maxLogBody,
-					apiKey:  apiKey,
-					status:  resp.Status,
-					headers: sanitized,
-				}
-			}
-
-			// log status and headers now; body will be logged when the response
-			// body is closed (to avoid blocking streaming responses)
-			log.Printf("<- response status=%s headers=%v", resp.Status, sanitized)
-		}
 		return nil
 	}
 

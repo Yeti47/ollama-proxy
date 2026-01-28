@@ -1,15 +1,11 @@
 package proxy
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -25,7 +21,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", false, false, "")
+		p := NewReverseProxy(u, "sk-test", false, "")
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -55,7 +51,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", true, false, "")
+		p := NewReverseProxy(u, "sk-test", true, "")
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -79,40 +75,6 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 	})
 }
 
-func TestVerboseRedactsAPIKey(t *testing.T) {
-	// capture logs
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Upstream", "yes")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("response body"))
-	}))
-	defer upstream.Close()
-
-	u, _ := url.Parse(upstream.URL)
-	p := NewReverseProxy(u, "sk-secret", false, true, "")
-	proxySrv := httptest.NewServer(p)
-	defer proxySrv.Close()
-
-	req, _ := http.NewRequest("POST", proxySrv.URL+"/api/echo", bytes.NewBuffer([]byte("hello")))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("do error: %v", err)
-	}
-	resp.Body.Close()
-
-	out := buf.String()
-	if strings.Contains(out, "sk-secret") {
-		t.Fatalf("logs must not contain API key")
-	}
-	if !strings.Contains(out, "[REDACTED]") {
-		t.Fatalf("expected redaction placeholder in logs")
-	}
-}
-
 func TestVersionFixup(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/version" {
@@ -125,7 +87,7 @@ func TestVersionFixup(t *testing.T) {
 	defer upstream.Close()
 
 	u, _ := url.Parse(upstream.URL)
-	p := NewReverseProxy(u, "", false, false, "0.15.2")
+	p := NewReverseProxy(u, "", false, "0.15.2")
 	proxySrv := httptest.NewServer(p)
 	defer proxySrv.Close()
 
@@ -157,7 +119,7 @@ func TestVersionCustomFallback(t *testing.T) {
 	defer upstream.Close()
 
 	u, _ := url.Parse(upstream.URL)
-	p := NewReverseProxy(u, "", false, false, "9.9.9")
+	p := NewReverseProxy(u, "", false, "9.9.9")
 	proxySrv := httptest.NewServer(p)
 	defer proxySrv.Close()
 
@@ -174,5 +136,41 @@ func TestVersionCustomFallback(t *testing.T) {
 	}
 	if v, ok := m["version"].(string); !ok || v != "9.9.9" {
 		t.Fatalf("expected version 9.9.9 got %v", m["version"])
+	}
+}
+func TestStreamingResponsePreserved(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("upstream ResponseWriter is not a Flusher")
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("part1\n"))
+		flusher.Flush()
+		// simulate streaming delay
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte("part2\n"))
+		flusher.Flush()
+		// return to close
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	p := NewReverseProxy(u, "", false, "")
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	resp, err := http.Get(proxySrv.URL + "/stream")
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	b, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read error: %v", err)
+	}
+	if string(b) != "part1\npart2\n" {
+		t.Fatalf("unexpected body: %q", string(b))
 	}
 }

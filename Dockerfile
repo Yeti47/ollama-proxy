@@ -12,5 +12,5 @@ COPY --from=builder /bin/ollama-proxy /usr/local/bin/ollama-proxy
 USER 1000:1000
 EXPOSE 11434
 # make the default listen address part of the ENTRYPOINT so user-supplied
-# arguments (e.g. -verbose) are appended rather than replacing the default
+# arguments are appended rather than replacing the default
 ENTRYPOINT ["/usr/local/bin/ollama-proxy", "-listen", ":11434"]
