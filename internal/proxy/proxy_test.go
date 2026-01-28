@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +25,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", false, false)
+		p := NewReverseProxy(u, "sk-test", false, false, "")
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -53,7 +55,7 @@ func TestAuthorizationInjectionAndPreserve(t *testing.T) {
 		defer upstream.Close()
 
 		u, _ := url.Parse(upstream.URL)
-		p := NewReverseProxy(u, "sk-test", true, false)
+		p := NewReverseProxy(u, "sk-test", true, false, "")
 		proxySrv := httptest.NewServer(p)
 		defer proxySrv.Close()
 
@@ -91,7 +93,7 @@ func TestVerboseRedactsAPIKey(t *testing.T) {
 	defer upstream.Close()
 
 	u, _ := url.Parse(upstream.URL)
-	p := NewReverseProxy(u, "sk-secret", false, true)
+	p := NewReverseProxy(u, "sk-secret", false, true, "")
 	proxySrv := httptest.NewServer(p)
 	defer proxySrv.Close()
 
@@ -108,5 +110,69 @@ func TestVerboseRedactsAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(out, "[REDACTED]") {
 		t.Fatalf("expected redaction placeholder in logs")
+	}
+}
+
+func TestVersionFixup(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/version" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"version":"0.0.0"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	p := NewReverseProxy(u, "", false, false, "0.15.2")
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	resp, err := http.Get(proxySrv.URL + "/api/version")
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if v, ok := m["version"].(string); !ok || v != "0.15.2" {
+		t.Fatalf("expected version 0.15.2 got %v", m["version"])
+	}
+}
+
+func TestVersionCustomFallback(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/version" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"version":"0.0.0.0"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer upstream.Close()
+
+	u, _ := url.Parse(upstream.URL)
+	p := NewReverseProxy(u, "", false, false, "9.9.9")
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	resp, err := http.Get(proxySrv.URL + "/api/version")
+	if err != nil {
+		t.Fatalf("get error: %v", err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if v, ok := m["version"].(string); !ok || v != "9.9.9" {
+		t.Fatalf("expected version 9.9.9 got %v", m["version"])
 	}
 }

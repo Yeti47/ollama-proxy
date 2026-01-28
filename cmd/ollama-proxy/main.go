@@ -21,7 +21,17 @@ func main() {
 	apiKey := flag.String("api-key", "", "Ollama API key to inject as Authorization: Bearer <key> (can also set OLLAMA_API_KEY env var)")
 	preserveAuth := flag.Bool("preserve-auth", false, "do not overwrite client Authorization header if present")
 	verbose := flag.Bool("verbose", false, "log full request and response bodies (API key will be redacted)")
+	versionFallback := flag.String("version-fallback", "", "fallback version to return for /api/version when upstream reports 0.0.0 (can also set PROXY_VERSION_FALLBACK env var)")
 	flag.Parse()
+
+	// compute effective fallback value
+	fallback := *versionFallback
+	if fallback == "" {
+		fallback = os.Getenv("PROXY_VERSION_FALLBACK")
+		if fallback == "" {
+			fallback = "0.15.2"
+		}
+	}
 
 	// prefer env var if flag not provided
 	key := *apiKey
@@ -34,9 +44,9 @@ func main() {
 		log.Fatalf("invalid target url: %v", err)
 	}
 
-	p := proxy.NewReverseProxy(u, key, *preserveAuth, *verbose)
+	p := proxy.NewReverseProxy(u, key, *preserveAuth, *verbose, fallback)
 	// don't log the API key; only log whether it's present. show if verbose is enabled
-	log.Printf("api-key present=%t preserve-auth=%t verbose=%t", key != "", *preserveAuth, *verbose)
+	log.Printf("api-key present=%t preserve-auth=%t verbose=%t version-fallback=%s", key != "", *preserveAuth, *verbose, fallback)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", loggingMiddleware(p))
