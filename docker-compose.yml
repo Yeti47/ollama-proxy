@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  ollama-proxy:
+    build: .
+    image: ollama-proxy:local
+    ports:
+      - "127.0.0.1:11434:11434"
+    env_file:
+      - .env
+    environment:
+      - LISTEN=127.0.0.1:11434
+      - TARGET=https://ollama.com
+    restart: unless-stopped

@@ -1,0 +1,24 @@
+# Binaries
+/bin/
+/ollama-proxy
+
+# Build
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+**/vendor/
+*.test
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+# Env files
+.env
+.env.*
+!.env.example
