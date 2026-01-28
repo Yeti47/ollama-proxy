@@ -41,7 +41,7 @@ curl -v http://localhost:11434/v1/models
 ## Test
 
 ```sh
-curl -v http://localhost:11434/some/path
+curl -v http://localhost:11434/api/tags
 ```
 
 ## Docker
@@ -67,7 +67,3 @@ docker-compose up -d --build
 ```
 
 The compose file maps port `11434` on localhost to the container. The `.env` file is read by Compose and is a convenient way to pass `OLLAMA_API_KEY` without exposing it in the `docker-compose.yml` file.
-
-## Notes
-- TLS verification is enabled by default for upstream connections.
-- Add metrics, rate limiting, and authentication when exposing this publicly.
