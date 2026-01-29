@@ -86,6 +86,58 @@ func NewReverseProxy(target *url.URL, apiKey string, preserveAuth bool, versionF
 	}
 
 	proxy.ModifyResponse = func(resp *http.Response) error {
+		// If upstream is using chunked transfer encoding, ensure we do not
+		// forward a Content-Length header which can confuse clients and lead
+		// to ERR_INCOMPLETE_CHUNKED_ENCODING when the lengths don't match.
+		if len(resp.TransferEncoding) > 0 {
+			for _, te := range resp.TransferEncoding {
+				if strings.EqualFold(te, "chunked") {
+					resp.Header.Del("Content-Length")
+					resp.ContentLength = -1
+					break
+				}
+			}
+		}
+
+		// Diagnostic logging: if the response is chunked or an error status,
+		// capture a small snippet of the body and headers to help debug
+		// intermittent upstream truncation or rate-limiting issues.
+		var isChunked bool
+		for _, te := range resp.TransferEncoding {
+			if strings.EqualFold(te, "chunked") {
+				isChunked = true
+				break
+			}
+		}
+		if isChunked || resp.StatusCode >= 400 {
+			// read up to maxLogBody bytes for logging and then restore the body
+			if resp.Body != nil {
+				snippetLimit := int64(maxLogBody)
+				b, _ := io.ReadAll(io.LimitReader(resp.Body, snippetLimit))
+				// mask sensitive content
+				bodySnippet := maskSensitive(apiKey, string(b))
+
+				// headers
+				var hdrs []string
+				for k, vv := range resp.Header {
+					hdrs = append(hdrs, k+": "+strings.Join(vv, ","))
+				}
+				headerStr := maskSensitive(apiKey, strings.Join(hdrs, "; "))
+
+				if resp.Request != nil {
+					log.Printf("upstream %s %s -> %d; headers=%s; body_snippet=%s",
+						resp.Request.Method, resp.Request.URL.String(), resp.StatusCode, headerStr, bodySnippet)
+				} else {
+					log.Printf("upstream -> %d; headers=%s; body_snippet=%s",
+						resp.StatusCode, headerStr, bodySnippet)
+				}
+
+				// restore body so normal proxy behavior continues
+				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(b), resp.Body))
+			} else {
+				log.Printf("upstream: status=%d (no body)", resp.StatusCode)
+			}
+		}
 		// Quick fix: if upstream /api/version returns an invalid version like
 		// "0.0.0" or "0.0.0.0", replace it with a compatible version
 		// (0.15.2) so clients that validate the version can continue.
